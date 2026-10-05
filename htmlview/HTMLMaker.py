@@ -172,6 +172,57 @@ def render_coverage_table(gene_stats_rows, min_reads=None):
     )
 
 
+# Region suffixes used in the split-consensus FASTA headers (SAMPLE_PRRT, SAMPLE_IN)
+# and how they are labelled in the report.
+SUBTYPE_REGIONS = [
+    ('PRRT', 'Protease / Reverse Transcriptase (PR/RT)'),
+    ('IN', 'Integrase (IN)'),
+]
+
+
+def load_region_subtypes(path):
+    """
+    Parse sierrapy fasta output for the split region sequences into
+        {fasta_header: subtype_text}
+    """
+    with open(path) as fh:
+        data = json.load(fh)
+    if isinstance(data, dict):
+        data = [data]
+    subtypes = {}
+    for entry in data:
+        header = entry.get('inputSequence', {}).get('header', '').split()
+        if not header:
+            continue
+        text = entry.get('subtypeText') or \
+            entry.get('bestMatchingSubtype', {}).get('display', '')
+        subtypes[header[0]] = text
+    return subtypes
+
+
+def get_region_subtypes(sample, region_subtypes):
+    """
+    Return [(region_label, subtype_text)] for one sample, matching the headers
+    SAMPLE_PRRT / SAMPLE_IN exactly so a subtype can never be attached to the
+    wrong sample.
+    """
+    rows = []
+    for suffix, label in SUBTYPE_REGIONS:
+        text = region_subtypes.get('{}_{}'.format(sample, suffix))
+        rows.append((label, text if text else 'Not available'))
+    return rows
+
+
+def render_subtype_table(rows):
+    body = "".join("<tr><td>{}</td><td>{}</td></tr>".format(r, t) for r, t in rows)
+    return (
+        "<h4>Subtype</h4>"
+        "<table class='table table-striped table-condensed' style='max-width:640px;'>"
+        "<thead><tr><th>Region</th><th>Subtype</th></tr></thead>"
+        "<tbody>{}</tbody></table>".format(body)
+    )
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('json', type=argparse.FileType('r'), help='Input JSON file.')
@@ -182,6 +233,10 @@ def parse_args():
                               'read-support (relative abundance + coverage) to the report. '
                               'If omitted, the script tries to auto-locate it using the '
                               '"name" field embedded in seqreads JSON output.')
+    parser.add_argument('--region-subtypes', default=None,
+                         help='Path to the sierrapy fasta JSON for the split region consensus '
+                              'sequences (FASTA headers SAMPLE_PRRT and SAMPLE_IN). For seqreads '
+                              'input, its PR/RT and IN subtypes replace the whole-sample subtype.')
     args = parser.parse_args()
     return args
 
@@ -273,6 +328,10 @@ def main():
         "<body>",
     ]
 
+    region_subtypes = None
+    if args.region_subtypes:
+        region_subtypes = load_region_subtypes(args.region_subtypes)
+
     js = json.load(args.json)
     if isinstance(js, dict):
         js = [js]  # seqreads output is a single object, not a list
@@ -316,7 +375,17 @@ def main():
                     html_template += ["<li><strong>{}:</strong> {}</li>".format(label, value_str)]
                 html_template += ["</ul></div>"]
 
-        html_template += ["<p><strong>Subtype:</strong> {}</p>".format(subtype)]
+        if is_seqreads:
+            if region_subtypes is not None:
+                html_template += [render_subtype_table(get_region_subtypes(header, region_subtypes))]
+            else:
+                html_template += [
+                    "<div class='alert alert-info' role='alert'>"
+                    "Region subtypes not provided. Pass --region-subtypes to report "
+                    "PR/RT and IN subtypes.</div>"
+                ]
+        else:
+            html_template += ["<p><strong>Subtype:</strong> {}</p>".format(subtype)]
 
         if is_seqreads and codfreq_table is None:
             html_template += [
