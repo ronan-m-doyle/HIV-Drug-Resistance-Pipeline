@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ----------------------------------------------------------------------
-# HIV Drug Resistance Pipeline v0.1
+# HIV Drug Resistance Pipeline v0.2
 # Author: Ronan Doyle, Lead Clinical Bioinformatician, Synnovis
 # ----------------------------------------------------------------------
 IFS=$'\n\t'
@@ -107,7 +107,7 @@ process_sample() {
     step_end=$(date +%s); log "✅ Step $step done in $((step_end-step_start))s"
 
     # ---------------- STEP 2: Porechop & NanoStat ----------------
-    step="porechop_nanostat"; step_start=$(date +%s)
+    step="porechop"; step_start=$(date +%s)
     log "▶ Step $step"
     mkdir -p ${sample_dir}/qc
     fq="${sample_dir}/${sample}_raw.fastq.gz"; out_trim="${sample_dir}/${sample}.fastq.gz"
@@ -134,10 +134,26 @@ process_sample() {
     fi
     step_end=$(date +%s); log "✅ Step $step done in $((step_end-step_start))s"
 
-    # ---------------- STEP 5: Produce Report ----------------
+    # ---------------- STEP 5: Per region consensus file and read depth ----------------
+    step="consensus"; step_start=$(date +%s)
+    log "▶ Step $step"
+    if ! python ${SCRIPT_DIR}/codfreq_consensus.py -s "$sample" -c "${sample_dir}/${sample}.codfreq" -o "${sample_dir}/${sample}_consensus_regions.fasta" -d "${sample_dir}/qc/region_read_depth.tsv"; then
+        log "❌ Step $step failed"; status="FAILED"; failed_step="$step"; echo -e "${sample}\t${status}\t${failed_step}\t-" >> "${MASTER_SUMMARY}"; return
+    fi
+    step_end=$(date +%s); log "✅ Step $step done in $((step_end-step_start))s"
+
+    # ---------------- STEP 6: Sub-type each region ----------------
+    step="subtype"; step_start=$(date +%s)
+    log "▶ Step $step"
+    if ! sierrapy fasta -o "${sample_dir}/${sample}_subtype_result.json" "${sample_dir}/${sample}_consensus_regions.fasta"; then
+        log "❌ Step $step failed"; status="FAILED"; failed_step="$step"; echo -e "${sample}\t${status}\t${failed_step}\t-" >> "${MASTER_SUMMARY}"; return
+    fi
+    step_end=$(date +%s); log "✅ Step $step done in $((step_end-step_start))s"
+
+    # ---------------- STEP 7: Produce Report ----------------
     step="html_report"; step_start=$(date +%s)
     log "▶ Step $step"
-    if ! python "${SCRIPT_DIR}/htmlview/HTMLMaker.py" -o "${sample_dir}/${sample}.html" "${sample_dir}/${sample}.report.json"; then
+    if ! python "${SCRIPT_DIR}/htmlview/HTMLMaker.py" --region-subtypes "${sample_dir}/${sample}_subtype_result.0.json" -o "${sample_dir}/${sample}.html" "${sample_dir}/${sample}.report.json"; then
         log "❌ Step $step failed"; status="FAILED"; failed_step="$step"; echo -e "${sample}\t${status}\t${failed_step}\t-" >> "${MASTER_SUMMARY}"; return
     fi
     step_end=$(date +%s); log "✅ Step $step done in $((step_end-step_start))s"
