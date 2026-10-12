@@ -129,7 +129,7 @@ process_sample() {
     # ---------------- STEP 4: HIVDB SeqReads analysis ----------------
     step="seqreads"; step_start=$(date +%s)
     log "▶ Step $step"
-    if ! sierrapy seqreads -D "50" -m "0.02" "${sample_dir}/${sample}.codfreq"; then
+    if ! sierrapy seqreads -D "100" -m "0.02" "${sample_dir}/${sample}.codfreq"; then
         log "❌ Step $step failed"; status="FAILED"; failed_step="$step"; echo -e "${sample}\t${status}\t${failed_step}\t-" >> "${MASTER_SUMMARY}"; return
     fi
     step_end=$(date +%s); log "✅ Step $step done in $((step_end-step_start))s"
